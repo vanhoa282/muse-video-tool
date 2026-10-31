@@ -52,8 +52,8 @@
 <script>
 const $ = id => document.getElementById(id);
 const serverEl = $('server'), keyEl = $('key'), listEl = $('list');
-serverEl.value = localStorage.getItem('mv_server') || '';
-keyEl.value = localStorage.getItem('mv_key') || '';
+try { serverEl.value = localStorage.getItem('mv_server') || ''; } catch (e) {}
+try { keyEl.value = localStorage.getItem('mv_key') || ''; } catch (e) {}
 function base() {
   return (serverEl.value.trim() || window.location.origin).replace(/\/$/, '');
 }
@@ -70,8 +70,10 @@ function esc(s) {
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 async function load() {
-  localStorage.setItem('mv_server', serverEl.value.trim());
-  localStorage.setItem('mv_key', keyEl.value.trim());
+  try {
+    localStorage.setItem('mv_server', serverEl.value.trim());
+    localStorage.setItem('mv_key', keyEl.value.trim());
+  } catch (e) { /* luu that bai thi van tai danh sach binh thuong */ }
   try {
     const r = await fetch(base() + '/jobs', { headers: headers() });
     const d = await r.json();

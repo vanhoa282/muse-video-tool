@@ -180,4 +180,6 @@ if __name__ == "__main__":
                or os.environ.get("PORT", "18700"))
     print(f"muse-video job server on 0.0.0.0:{port} "
           f"(gateway {GATEWAY})", flush=True)
+    print(f"Mo trinh duyet tren cung may nay: http://127.0.0.1:{port}/",
+          flush=True)
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

@@ -1,0 +1,34 @@
+# MuseVideo full stack: gateway (muse2api, browser driver) + tool server.
+# Deploy: copy this dir + ../muse2api to the host, put the tool token set
+# in tool/.env (MUSE_JOB_API_KEY, MUSE_GATEWAY_ADMIN_KEY) and the gateway
+# keys in muse2api/.env, then: docker compose up -d --build
+# Plugin import (sếp thao tác): point the extension at http://<host>:18610
+# with the gateway admin key; the tool web UI lives at http://<host>:18700.
+services:
+  gateway:
+    build: ../muse2api
+    image: muse2api:latest
+    restart: unless-stopped
+    env_file:
+      - path: ../muse2api/.env
+        required: false
+    ports:
+      - "18610:18610"
+    volumes:
+      - ./gateway-data:/app/data
+    shm_size: "1gb"
+  tool:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - MUSE_GATEWAY_URL=http://gateway:18610
+      - MUSE_JOB_PORT=18700
+    ports:
+      - "18700:18700"
+    volumes:
+      - ./tool-projects:/app/projects
+    depends_on:
+      - gateway

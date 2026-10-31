@@ -19,7 +19,8 @@ Env: MUSE_GATEWAY_URL (default http://127.0.0.1:18610),
      gateway),
      MUSE_JOB_API_KEY (client token for the web UI; when set, /jobs
      routes require header X-Api-Key),
-     MUSE_JOB_PORT (default 18700).
+     MUSE_JOB_PORT (default 18700, or $PORT when set — Render injects
+     $PORT, so the server listens on Render's port automatically).
 A .env file next to this script (KEY=VALUE lines) is loaded first, so
 tokens never need to travel on a command line.
 """
@@ -175,7 +176,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("MUSE_JOB_PORT", "18700"))
+    port = int(os.environ.get("MUSE_JOB_PORT")
+               or os.environ.get("PORT", "18700"))
     print(f"muse-video job server on 0.0.0.0:{port} "
           f"(gateway {GATEWAY})", flush=True)
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

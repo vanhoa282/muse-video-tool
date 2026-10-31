@@ -1,0 +1,18 @@
+# Render Blueprint: deploy MuseVideo tool tu GitHub repo nay (free tier).
+# Cach dung: Render dashboard -> New -> Blueprint -> chon repo
+# vanhoa282/muse-video-tool -> dien cac env sync:false ben duoi o
+# dashboard Render (KHONG ghi token that vao git).
+services:
+  - type: web
+    name: musevideo-tool
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: MUSE_JOB_API_KEY
+        sync: false
+      - key: MUSE_API_KEY
+        sync: false
+      - key: MUSE_GATEWAY_URL
+        sync: false

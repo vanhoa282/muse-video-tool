@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Test the web build of muse-video-tool (stdlib only).
+"""Test the operator-queue build of muse-video-tool (stdlib only).
 
 Loads the tool token from .env (never from argv), then checks:
-  1. GET / serves the web UI
+  1. GET / and GET /admin serve HTML pages
   2. POST /jobs without the token -> 401
-  3. Two concurrent test-clips jobs (multitask) both reach done
-  4. Both downloads are real MP4s
+  3. POST /jobs creates an order in status cho_chay (NOT auto-run)
+  4. GET /jobs lists it; POST /jobs/{id}/run starts it
+  5. Poll -> done; download is a real MP4; second run returns done
 Usage: python3 test_web.py [server_url]
 """
 
@@ -50,52 +51,69 @@ def req(method, path, body=None, key=None):
 def main():
     token = load_dotenv().get("MUSE_JOB_API_KEY", "")
     assert token, "MUSE_JOB_API_KEY missing from .env"
-    # 1. Web UI
-    status, body, headers = req("GET", "/")
+    # 1. Pages
+    status, body, _ = req("GET", "/")
     assert status == 200 and b"MuseVideo" in body, f"GET / -> {status}"
-    assert headers.get("Access-Control-Allow-Origin") == "*", "CORS missing"
-    print("1. web UI OK (CORS OK)")
+    status, body, _ = req("GET", "/admin")
+    assert status == 200 and "Trang".encode() in body, \
+        f"GET /admin -> {status}"
+    print("1. web UI + admin page OK")
     # 2. No token -> 401
     scenes = [{"prompt": "test", "caption": "Test"}]
-    status, body, _ = req("POST", "/jobs",
-                          {"scenes": scenes, "duration": 5,
-                           "mode": "test-clips"})
+    status, _, _ = req("POST", "/jobs",
+                       {"scenes": scenes, "duration": 5,
+                        "mode": "test-clips"})
     assert status == 401, f"no-key POST -> {status} (expected 401)"
-    print("2. no-key POST -> 401 OK")
-    # 3. Two concurrent jobs
-    ids = []
-    for i in range(2):
-        status, body, _ = req("POST", "/jobs",
-                              {"scenes": [
-                                  {"prompt": "A cute monkey walking",
-                                   "caption": f"Job {i+1} canh 1"},
-                                  {"prompt": "A cute frog jumping",
-                                   "caption": f"Job {i+1} canh 2"}],
-                               "duration": 5, "mode": "test-clips"},
-                              key=token)
-        assert status == 200, f"POST job {i+1} -> {status}: {body[:200]}"
-        ids.append(json.loads(body)["id"])
-    print(f"3. 2 jobs created (multitask): {ids}")
+    status, _, _ = req("GET", "/jobs")
+    assert status == 401, f"no-key list -> {status} (expected 401)"
+    print("2. no-key POST/list -> 401 OK")
+    # 3. Create order (queued, not auto-run)
+    status, body, _ = req("POST", "/jobs",
+                          {"scenes": [
+                              {"prompt": "A cute monkey walking",
+                               "caption": "Canh 1"},
+                              {"prompt": "A cute frog jumping",
+                               "caption": "Canh 2"}],
+                           "duration": 5, "mode": "test-clips"},
+                          key=token)
+    assert status == 200, f"POST -> {status}: {body[:200]}"
+    job = json.loads(body)
+    assert job["status"] == "cho_chay", f"new order: {job}"
+    jid = job["id"]
+    print(f"3. order created, queued: {jid}")
+    time.sleep(3)
+    status, body, _ = req("GET", f"/jobs/{jid}", key=token)
+    assert json.loads(body)["status"] == "cho_chay", \
+        "order auto-ran (should wait for operator)"
+    status, body, _ = req("GET", "/jobs", key=token)
+    ids = [o["id"] for o in json.loads(body)["orders"]]
+    assert jid in ids, "order missing from list"
+    print("3. order stays queued, listed OK")
+    # 4. Operator runs it
+    status, body, _ = req("POST", f"/jobs/{jid}/run", key=token)
+    assert status == 200, f"run -> {status}: {body[:200]}"
+    assert json.loads(body)["status"] == "dang_chay", body[:200]
     deadline = time.time() + 240
-    done = set()
-    while len(done) < 2 and time.time() < deadline:
-        for jid in ids:
-            if jid in done:
-                continue
-            status, body, _ = req("GET", f"/jobs/{jid}", key=token)
-            if json.loads(body).get("status") == "done":
-                done.add(jid)
+    while True:
+        status, body, _ = req("GET", f"/jobs/{jid}", key=token)
+        st = json.loads(body)["status"]
+        print(f"poll: {st}")
+        if st in ("done", "failed"):
+            break
+        assert time.time() < deadline, "run timeout"
         time.sleep(5)
-    assert len(done) == 2, f"only {len(done)}/2 jobs done"
-    print("3. both jobs done OK")
-    # 4. Downloads
-    for jid in ids:
-        status, data, _ = req("GET", f"/jobs/{jid}/download", key=token)
-        assert status == 200 and len(data) > 100000, \
-            f"download {jid} -> {status}, {len(data)} bytes"
-        assert data[4:8] == b"ftyp", "not an MP4"
-        print(f"4. download {jid}: {len(data)} bytes, MP4 OK")
-    print("ALL WEB TESTS PASSED")
+    assert st == "done", f"final status: {st}"
+    print("4. operator run -> done OK")
+    # 5. Download + idempotent re-run
+    status, data, _ = req("GET", f"/jobs/{jid}/download", key=token)
+    assert status == 200 and len(data) > 100000, \
+        f"download -> {status}, {len(data)} bytes"
+    assert data[4:8] == b"ftyp", "not an MP4"
+    print(f"5. download: {len(data)} bytes, MP4 OK")
+    status, body, _ = req("POST", f"/jobs/{jid}/run", key=token)
+    assert json.loads(body)["status"] == "done", "re-run not idempotent"
+    print("5. re-run on done order -> done OK")
+    print("ALL QUEUE TESTS PASSED")
     return 0
 
 

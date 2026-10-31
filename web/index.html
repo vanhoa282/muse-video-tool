@@ -50,6 +50,7 @@
 
 <button id="create">Tạo video</button>
 <button id="download" style="display:none">⬇ Tải video về máy</button>
+<a id="adminlink" href="#" style="display:none; margin-left: 12px;">Mở trang điều hành →</a>
 <div id="status">Chưa có job nào.</div>
 
 <script>
@@ -93,7 +94,10 @@ createBtn.onclick = async () => {
     if (!r.ok) { say('Lỗi ' + r.status + ': ' + (d.error || 'không tạo được job') +
       (r.status === 401 ? ' — kiểm tra lại token riêng.' : '')); createBtn.disabled = false; return; }
     jobId = d.id;
-    say('Job ' + jobId + ' đang chạy...');
+    const al = $('adminlink');
+    al.href = base() + '/admin';
+    al.style.display = 'inline';
+    say('Đã gửi đơn ' + jobId + ' lên trang điều hành. Chờ điều hành bấm chạy...');
     clearInterval(timer);
     timer = setInterval(poll, 3000);
   } catch (e) { say('Không nối được server: ' + e); createBtn.disabled = false; }
@@ -102,7 +106,9 @@ async function poll() {
   try {
     const r = await fetch(base() + '/jobs/' + jobId, { headers: headers() });
     const d = await r.json();
-    let t = 'Job ' + jobId + '\nTrạng thái: ' + d.status;
+    const LM = { cho_chay: 'Chờ điều hành chạy', dang_chay: 'Đang chạy',
+      done: 'Xong', failed: 'Lỗi' };
+    let t = 'Đơn ' + jobId + '\nTrạng thái: ' + (LM[d.status] || d.status);
     if (Array.isArray(d.scenes)) {
       t += '\n' + d.scenes.map((s, i) => (s.status === 'done' ? '✓' : '…') +
         ' Cảnh ' + (i + 1) + ': ' + (s.caption || '')).join('\n');

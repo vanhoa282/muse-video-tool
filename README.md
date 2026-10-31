@@ -2,10 +2,17 @@
 
 Ảnh + video do Muse AI sinh, ráp sẵn phụ đề, xuất MP4 dọc 1080x1920.
 
+## Mô hình điều hành (hàng đợi đơn)
+- Người dùng gửi yêu cầu ở trang chính (`/`) -> đơn vào trang điều hành
+  ở trạng thái "Chờ chạy" (KHÔNG chạy ngay).
+- Điều hành mở trang `/admin`, thấy danh sách đơn, bấm **Chạy** từng đơn.
+  Đơn xong thì tải MP4 về giao.
+- Token điều hành: cùng 1 token cho cả 2 trang (điền ở ô token).
+
 ## Chạy web UI (không cần cài app)
 - Mở `web/index.html` bằng trình duyệt, hoặc chạy server rồi mở địa chỉ server.
 - Nhập kịch bản từng dòng dạng: `lời thoại | prompt tiếng Anh`, bấm Tạo video,
-  xem tiến trình, xong tải MP4 về máy.
+  đơn sẽ vào trang điều hành chờ chạy.
 
 ## Chạy server (cần máy chạy Python + FFmpeg)
 - Copy `.env.example` thành `.env`, điền token riêng vào.

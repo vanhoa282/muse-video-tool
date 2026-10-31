@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """Job server for muse-video-tool (stdlib only).
 
-Wraps worker.py as HTTP jobs so the Expo app can create a video job, poll
-its progress and download the finished MP4.
+Operator-queue model (theo mo hinh dieu hanh cua Hoa):
+  - Nguoi dung gui yeu cau tao video -> don hang vao trang dieu hanh,
+    trang thai "cho_chay" (KHONG chay ngay).
+  - Operator (nguoi dieu hanh) mo trang /admin, thay danh sach don,
+    bam Chay tung don -> worker chay -> xong -> tai MP4.
 
   POST /jobs  {"scenes": [{"prompt": ..., "caption": ...}], "duration": 5,
-               "mode": "gateway"|"test-clips"} -> {"id": ..., "status": "queued"}
-  GET  /jobs/{id}          -> job.json (status, scenes, output)
+               "mode": "gateway"|"test-clips"} -> {"id": ..., "status": "cho_chay"}
+  GET  /jobs               -> danh sach don (moi nhat truoc)
+  GET  /jobs/{id}          -> don hang (don + tien trinh chay)
+  POST /jobs/{id}/run      -> operator bam chay don (chi chay tu cho_chay)
   GET  /jobs/{id}/download -> out.mp4 (404 until done)
   GET  /health             -> {"ok": true}
   GET  /                   -> web UI (web/index.html)
+  GET  /admin              -> trang dieu hanh (web/admin.html)
 
 Web UI + API are one unit: open the server URL in any browser and the
 tool runs there. The UI sends X-Api-Key on every /jobs call.
@@ -25,6 +31,7 @@ A .env file next to this script (KEY=VALUE lines) is loaded first, so
 tokens never need to travel on a command line.
 """
 
+import datetime
 import json
 import os
 import subprocess
@@ -56,6 +63,55 @@ _load_dotenv()
 GATEWAY = os.environ.get("MUSE_GATEWAY_URL", "http://127.0.0.1:18610")
 API_KEY = os.environ.get("MUSE_API_KEY", "testkey-local")
 JOB_TOKEN = os.environ.get("MUSE_JOB_API_KEY", "")
+
+
+def _order_view(job_dir):
+    """Merged view of an order: request (order.json) + run progress
+    (job.json, written by the worker). Old job dirs without order.json
+    (created before the queue model) still display from job.json."""
+    view = {"status": "cho_chay", "scenes": []}
+    op = os.path.join(job_dir, "order.json")
+    if os.path.exists(op):
+        try:
+            with open(op, encoding="utf-8") as f:
+                view.update(json.load(f))
+        except Exception:
+            pass
+    sp = os.path.join(job_dir, "job.json")
+    if os.path.exists(sp):
+        try:
+            with open(sp, encoding="utf-8") as f:
+                prog = json.load(f)
+        except Exception:
+            prog = {}
+        st = prog.get("status")
+        if st == "started":
+            view["status"] = "dang_chay"
+        elif st in ("done", "failed"):
+            view["status"] = st
+        if prog.get("scenes"):
+            view["scenes"] = prog["scenes"]
+        if prog.get("error"):
+            view["error"] = prog["error"]
+        if prog.get("output"):
+            view["output"] = prog["output"]
+    return view
+
+
+def _list_orders():
+    orders = []
+    if not os.path.isdir(PROJECTS):
+        return orders
+    for job_id in sorted(os.listdir(PROJECTS)):
+        job_dir = os.path.join(PROJECTS, job_id)
+        if not os.path.isdir(job_dir):
+            continue
+        v = _order_view(job_dir)
+        v["id"] = job_id
+        orders.append(v)
+    orders.sort(key=lambda o: (o.get("created", ""), o["id"]),
+                reverse=True)
+    return orders
 
 
 def run_job(job_id, scenes, duration, mode):
@@ -120,17 +176,25 @@ class Handler(BaseHTTPRequestHandler):
                 with open(fp, "rb") as f:
                     return self._send(200, f.read(), "text/html")
             return self._send(404, {"error": "web UI not built"})
+        if p == "/admin":
+            fp = os.path.join(WEB, "admin.html")
+            if os.path.exists(fp):
+                with open(fp, "rb") as f:
+                    return self._send(200, f.read(), "text/html")
+            return self._send(404, {"error": "admin page not built"})
         parts = [unquote(x) for x in p.strip("/").split("/") if x]
+        if parts == ["jobs"]:
+            if not self._auth_ok():
+                return self._send(401, {"error": "bad api key"})
+            return self._send(200, {"orders": _list_orders()})
         if len(parts) == 2 and parts[0] == "jobs":
             if not self._auth_ok():
                 return self._send(401, {"error": "bad api key"})
             job_dir = os.path.join(PROJECTS, parts[1])
-            sp = os.path.join(job_dir, "job.json")
-            if os.path.exists(sp):
-                with open(sp, encoding="utf-8") as f:
-                    return self._send(200, json.load(f))
             if os.path.isdir(job_dir):
-                return self._send(200, {"status": "queued", "scenes": []})
+                v = _order_view(job_dir)
+                v["id"] = parts[1]
+                return self._send(200, v)
             return self._send(404, {"error": "job not found"})
         if len(parts) == 3 and parts[0] == "jobs" \
                 and parts[2] == "download":
@@ -144,7 +208,33 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
-        if urlparse(self.path).path != "/jobs":
+        p = urlparse(self.path).path
+        parts = [unquote(x) for x in p.strip("/").split("/") if x]
+        if len(parts) == 3 and parts[0] == "jobs" and parts[2] == "run":
+            if not self._auth_ok():
+                return self._send(401, {"error": "bad api key"})
+            job_dir = os.path.join(PROJECTS, parts[1])
+            if not os.path.isdir(job_dir):
+                return self._send(404, {"error": "job not found"})
+            view = _order_view(job_dir)
+            if view["status"] == "done":
+                return self._send(200, {"id": parts[1], "status": "done"})
+            if view["status"] == "dang_chay":
+                return self._send(200, {"id": parts[1],
+                                        "status": "dang_chay"})
+            op = os.path.join(job_dir, "order.json")
+            if not os.path.exists(op):
+                return self._send(400, {"error": "order has no request"})
+            with open(op, encoding="utf-8") as f:
+                order = json.load(f)
+            threading.Thread(
+                target=run_job,
+                args=(parts[1], order["scenes"], order["duration"],
+                      order["mode"]),
+                daemon=True).start()
+            return self._send(200, {"id": parts[1],
+                                    "status": "dang_chay"})
+        if p != "/jobs":
             return self._send(404, {"error": "not found"})
         if not self._auth_ok():
             return self._send(401, {"error": "bad api key"})
@@ -166,13 +256,17 @@ class Handler(BaseHTTPRequestHandler):
         job_id = uuid.uuid4().hex[:12]
         job_dir = os.path.join(PROJECTS, job_id)
         os.makedirs(job_dir, exist_ok=True)
-        with open(os.path.join(job_dir, "job.json"), "w",
+        with open(os.path.join(job_dir, "order.json"), "w",
                   encoding="utf-8") as f:
-            json.dump({"status": "queued", "scenes": []}, f)
-        threading.Thread(target=run_job,
-                         args=(job_id, scenes, duration, mode),
-                         daemon=True).start()
-        return self._send(200, {"id": job_id, "status": "queued"})
+            json.dump({
+                "status": "cho_chay",
+                "scenes": scenes,
+                "duration": duration,
+                "mode": mode,
+                "created": datetime.datetime.now().isoformat(
+                    timespec="seconds"),
+            }, f, ensure_ascii=False, indent=2)
+        return self._send(200, {"id": job_id, "status": "cho_chay"})
 
 
 if __name__ == "__main__":

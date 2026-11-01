@@ -8,13 +8,16 @@ Operator-queue model (theo mo hinh dieu hanh cua Hoa):
     bam Chay tung don -> worker chay -> xong -> tai MP4.
 
   POST /jobs  {"scenes": [{"prompt": ..., "caption": ...}], "duration": 5,
-               "mode": "gateway"|"test-clips"} -> {"id": ..., "status": "cho_chay"}
+               "mode": "gateway"|"test-clips"|"operator"} -> {"id": ..., "status": "cho_chay"}
   GET  /jobs               -> danh sach don (moi nhat truoc)
   GET  /jobs/{id}          -> don hang (don + tien trinh chay)
-  POST /jobs/{id}/run      -> operator bam chay don (chi chay tu cho_chay)
+  POST /jobs/{id}/run      -> operator bam chay don (chi chay tu cho_chay;
+                              don "operator" KHONG tu chay — dieu hanh xu ly
+                              thu cong roi danh dau xong)
   GET  /jobs/{id}/download -> out.mp4 (404 until done)
   GET  /health             -> {"ok": true}
   GET  /                   -> web UI (web/index.html)
+  GET  /client             -> giao dien client kieu FrameWeaver (web/client.html)
   GET  /admin              -> trang dieu hanh (web/admin.html)
 
 Web UI + API are one unit: open the server URL in any browser and the
@@ -182,6 +185,12 @@ class Handler(BaseHTTPRequestHandler):
                 with open(fp, "rb") as f:
                     return self._send(200, f.read(), "text/html")
             return self._send(404, {"error": "admin page not built"})
+        if p == "/client":
+            fp = os.path.join(WEB, "client.html")
+            if os.path.exists(fp):
+                with open(fp, "rb") as f:
+                    return self._send(200, f.read(), "text/html")
+            return self._send(404, {"error": "client page not built"})
         parts = [unquote(x) for x in p.strip("/").split("/") if x]
         if parts == ["jobs"]:
             if not self._auth_ok():
@@ -227,6 +236,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "order has no request"})
             with open(op, encoding="utf-8") as f:
                 order = json.load(f)
+            if order.get("mode") == "operator":
+                return self._send(400, {"error":
+                    "operator order: processed manually by the operator"})
             threading.Thread(
                 target=run_job,
                 args=(parts[1], order["scenes"], order["duration"],
@@ -251,21 +263,26 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return self._send(400, {"error": "bad duration"})
         mode = body.get("mode", "gateway")
-        if mode not in ("gateway", "test-clips"):
+        if mode not in ("gateway", "test-clips", "operator"):
             return self._send(400, {"error": "bad mode"})
         job_id = uuid.uuid4().hex[:12]
         job_dir = os.path.join(PROJECTS, job_id)
         os.makedirs(job_dir, exist_ok=True)
+        order = {
+            "status": "cho_chay",
+            "scenes": scenes,
+            "duration": duration,
+            "mode": mode,
+            "created": datetime.datetime.now().isoformat(
+                timespec="seconds"),
+        }
+        if isinstance(body.get("title"), str) and body["title"]:
+            order["title"] = body["title"]
+        if isinstance(body.get("characters"), list):
+            order["characters"] = body["characters"]
         with open(os.path.join(job_dir, "order.json"), "w",
                   encoding="utf-8") as f:
-            json.dump({
-                "status": "cho_chay",
-                "scenes": scenes,
-                "duration": duration,
-                "mode": mode,
-                "created": datetime.datetime.now().isoformat(
-                    timespec="seconds"),
-            }, f, ensure_ascii=False, indent=2)
+            json.dump(order, f, ensure_ascii=False, indent=2)
         return self._send(200, {"id": job_id, "status": "cho_chay"})
 
 

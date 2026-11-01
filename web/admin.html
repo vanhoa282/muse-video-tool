@@ -86,19 +86,27 @@ async function load() {
     if (!orders.length) { listEl.innerHTML = '<p>Chưa có đơn nào.</p>'; return; }
     listEl.innerHTML = orders.map(o => {
       const scenes = (o.scenes || []).map((s, i) =>
-        (i + 1) + '. ' + esc(s.caption || '')).join('\n');
+        (i + 1) + '. ' + esc(s.caption || '') +
+        (s.duration ? ' (' + esc(s.duration) + 's)' : '')).join('\n');
+      const chars = (o.characters || []).map(c =>
+        '🧸 ' + esc(c.name || '') +
+        (c.desc ? ': ' + esc(c.desc) : '')).join('\n');
       const btns = [];
-      if (o.status === 'cho_chay')
+      if (o.status === 'cho_chay' && o.mode !== 'operator')
         btns.push('<button class="run" onclick="runJob(\'' + o.id +
           '\')">▶ Chạy đơn này</button>');
+      if (o.status === 'cho_chay' && o.mode === 'operator')
+        btns.push('<span class="hint">Chờ điều hành xử lý thủ công</span>');
       if (o.status === 'done')
         btns.push('<button class="dl" onclick="dlJob(\'' + o.id +
           '\')">⬇ Tải video</button>');
       return '<div class="order"><b>Đơn ' + esc(o.id) + '</b> ' +
         '<span class="badge ' + o.status + '">' +
         (LABEL[o.status] || o.status) + '</span>' +
+        (o.title ? '<div><b>' + esc(o.title) + '</b></div>' : '') +
         '<div class="hint">' + esc(o.created || '') + ' · ' +
-        esc(o.mode || '') + ' · ' + esc(o.duration || '') + ' giây/cảnh</div>' +
+        esc(o.mode || '') + ' · ' + esc(o.duration || '') + ' giây</div>' +
+        (chars ? '<div class="scenes">' + chars + '</div>' : '') +
         '<div class="scenes">' + scenes + '</div>' +
         (o.error ? '<div class="err">' + esc(o.error) + '</div>' : '') +
         btns.join(' ') + '</div>';

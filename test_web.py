@@ -113,6 +113,28 @@ def main():
     status, body, _ = req("POST", f"/jobs/{jid}/run", key=token)
     assert json.loads(body)["status"] == "done", "re-run not idempotent"
     print("5. re-run on done order -> done OK")
+    # 6. Client page + operator orders (FrameWeaver-style client)
+    status, body, _ = req("GET", "/client")
+    assert status == 200 and b"MuseVideo" in body, f"GET /client -> {status}"
+    status, body, _ = req("POST", "/jobs",
+                          {"title": "Test truyen",
+                           "characters": [{"name": "Khi", "desc": "khi con"}],
+                           "scenes": [{"prompt": "test", "caption": "Canh 1",
+                                       "duration": 7}],
+                           "duration": 7, "mode": "operator"},
+                          key=token)
+    assert status == 200, f"operator POST -> {status}: {body[:200]}"
+    op = json.loads(body)
+    assert op["status"] == "cho_chay", op
+    status, body, _ = req("POST", f"/jobs/{op['id']}/run", key=token)
+    assert status == 400, f"operator run -> {status} (expected 400)"
+    status, body, _ = req("GET", f"/jobs/{op['id']}", key=token)
+    v = json.loads(body)
+    assert v["mode"] == "operator" and v.get("title") == "Test truyen", \
+        body[:200]
+    assert v["characters"][0]["name"] == "Khi", body[:200]
+    assert v["scenes"][0].get("duration") == 7, body[:200]
+    print("6. client page + operator order OK")
     print("ALL QUEUE TESTS PASSED")
     return 0
 

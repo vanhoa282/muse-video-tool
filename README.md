@@ -3,10 +3,14 @@
 Ảnh + video do Muse AI sinh, ráp sẵn phụ đề, xuất MP4 dọc 1080x1920.
 
 ## Mô hình điều hành (hàng đợi đơn)
-- Người dùng gửi yêu cầu ở trang chính (`/`) -> đơn vào trang điều hành
-  ở trạng thái "Chờ chạy" (KHÔNG chạy ngay).
+- Người dùng gửi yêu cầu ở trang chính (`/`) hoặc giao diện client kiểu
+  FrameWeaver (`/client`: dự án, nhân vật, nhiều cảnh có thời lượng riêng)
+  -> đơn vào trang điều hành ở trạng thái "Chờ chạy" (KHÔNG chạy ngay).
 - Điều hành mở trang `/admin`, thấy danh sách đơn, bấm **Chạy** từng đơn.
   Đơn xong thì tải MP4 về giao.
+- Đơn chế độ `operator` (từ trang client) KHÔNG tự chạy bằng worker — điều
+  hành xử lý thủ công rồi đánh dấu xong, trang admin chỉ hiện "Chờ điều hành
+  xử lý thủ công" thay cho nút Chạy.
 - Token điều hành: cùng 1 token cho cả 2 trang (điền ở ô token).
 
 ## Chạy web UI (không cần cài app)

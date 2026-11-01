@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MuseVideo — Tạo truyện video</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 0 auto;
+         padding: 16px; background: #111; color: #eee; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 17px; margin-top: 24px; }
+  label { display: block; margin-top: 12px; font-weight: 600; }
+  input, textarea { width: 100%; box-sizing: border-box; margin-top: 4px;
+    padding: 8px; border-radius: 8px; border: 1px solid #444;
+    background: #222; color: #eee; font-size: 15px; }
+  textarea { min-height: 56px; }
+  button { margin-top: 10px; padding: 10px 16px; border: 0; border-radius: 10px;
+    background: #7c5cff; color: #fff; font-size: 15px; font-weight: 700; }
+  button:disabled { opacity: .5; }
+  button.small { padding: 6px 10px; font-size: 13px; margin: 4px 4px 0 0;
+    background: #333; }
+  button.send { background: #1a9e5c; width: 100%; padding: 14px; }
+  button.dl { background: #2563eb; }
+  .hint { color: #aaa; font-size: 13px; margin-top: 4px; }
+  .card { background: #1c1c1c; border-radius: 12px; padding: 12px;
+    margin-top: 12px; }
+  .card h3 { margin: 0 0 4px 0; font-size: 15px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .row .dur { flex: 0 0 90px; }
+  #status { white-space: pre-wrap; margin-top: 12px; }
+  a { color: #9db4ff; }
+</style>
+</head>
+<body>
+<h1>🎬 MuseVideo — Tạo truyện video</h1>
+<p>Soạn truyện theo từng cảnh, gửi lên trang điều hành. Điều hành sẽ xử lý đơn và giao video thành phẩm.</p>
+<p><a href="./">← Trang gửi nhanh</a> · <a href="./admin">Trang điều hành →</a></p>
+
+<label>Địa chỉ server
+  <input id="server" type="text" placeholder="http://may-chu:18700">
+</label>
+<div class="hint">Mở trang này từ chính server thì để trống là tự nhận địa chỉ hiện tại.</div>
+
+<label>Token điều hành
+  <input id="key" type="password" placeholder="token điều hành">
+</label>
+
+<label>Tên dự án
+  <input id="title" type="text" placeholder="VD: Khỉ và Rùa đi dạo">
+</label>
+
+<h2>🧸 Nhân vật (giữ ngoại hình nhất quán giữa các cảnh)</h2>
+<div id="chars"></div>
+<div class="row">
+  <input id="charName" type="text" placeholder="Tên nhân vật, VD: Khỉ">
+  <input id="charDesc" type="text" placeholder="Mô tả, VD: khỉ con lông nâu, đeo nơ đỏ">
+</div>
+<button class="small" id="addChar">+ Thêm nhân vật</button>
+
+<h2>🎞️ Các cảnh (theo thứ tự truyện)</h2>
+<div id="scenes"></div>
+<button class="small" id="addScene">+ Thêm cảnh</button>
+<div class="hint" id="total"></div>
+
+<button class="send" id="send">Gửi đơn lên trang điều hành</button>
+<button class="dl" id="download" style="display:none">⬇ Tải video về máy</button>
+<div id="status"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const serverEl = $('server'), keyEl = $('key');
+try { serverEl.value = localStorage.getItem('mv_server') || ''; } catch (e) {}
+try { keyEl.value = localStorage.getItem('mv_key') || ''; } catch (e) {}
+function base() {
+  return (serverEl.value.trim() || window.location.origin).replace(/\/$/, '');
+}
+function headers() {
+  const h = { 'Content-Type': 'application/json' };
+  const k = keyEl.value.trim();
+  if (k) h['X-Api-Key'] = k;
+  return h;
+}
+function saveConn() {
+  try {
+    localStorage.setItem('mv_server', serverEl.value.trim());
+    localStorage.setItem('mv_key', keyEl.value.trim());
+  } catch (e) {}
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+let chars = [];
+let scenes = [{ prompt: '', caption: '', duration: 5 }];
+
+function renderChars() {
+  $('chars').innerHTML = chars.map((c, i) =>
+    '<div class="card"><h3>' + esc(c.name) + '</h3><div>' + esc(c.desc) +
+    '</div><button class="small" onclick="delChar(' + i + ')">Xóa</button></div>'
+  ).join('');
+}
+function renderScenes() {
+  $('scenes').innerHTML = scenes.map((s, i) =>
+    '<div class="card"><h3>Cảnh ' + (i + 1) + '</h3>' +
+    '<label>Prompt tiếng Anh (mô tả cảnh)' +
+    '<textarea data-i="' + i + '" data-f="prompt">' + esc(s.prompt) +
+    '</textarea></label>' +
+    '<label>Lời thoại / phụ đề' +
+    '<input data-i="' + i + '" data-f="caption" value="' + esc(s.caption) +
+    '"></label>' +
+    '<label>Thời lượng (giây)' +
+    '<input type="number" min="1" max="60" data-i="' + i + '" data-f="duration" value="' +
+    esc(s.duration) + '"></label>' +
+    '<button class="small" onclick="moveScene(' + i + ',-1)">↑ Lên</button>' +
+    '<button class="small" onclick="moveScene(' + i + ',1)">↓ Xuống</button>' +
+    '<button class="small" onclick="delScene(' + i + ')">Xóa cảnh</button></div>'
+  ).join('');
+  document.querySelectorAll('#scenes [data-i]').forEach(el => {
+    el.oninput = () => {
+      const i = +el.dataset.i, f = el.dataset.f;
+      scenes[i][f] = f === 'duration' ? (parseInt(el.value) || 5) : el.value;
+      renderTotal();
+    };
+  });
+  renderTotal();
+}
+function renderTotal() {
+  const t = scenes.reduce((a, s) => a + (parseInt(s.duration) || 5), 0);
+  $('total').textContent = scenes.length + ' cảnh · tổng khoảng ' + t + ' giây.';
+}
+function delChar(i) { chars.splice(i, 1); renderChars(); }
+function delScene(i) {
+  if (scenes.length === 1) { alert('Giữ lại ít nhất 1 cảnh.'); return; }
+  scenes.splice(i, 1); renderScenes();
+}
+function moveScene(i, d) {
+  const j = i + d;
+  if (j < 0 || j >= scenes.length) return;
+  const t = scenes[i]; scenes[i] = scenes[j]; scenes[j] = t;
+  renderScenes();
+}
+$('addChar').onclick = () => {
+  const n = $('charName').value.trim(), d = $('charDesc').value.trim();
+  if (!n) { alert('Nhập tên nhân vật.'); return; }
+  chars.push({ name: n, desc: d });
+  $('charName').value = ''; $('charDesc').value = '';
+  renderChars();
+};
+$('addScene').onclick = () => {
+  scenes.push({ prompt: '', caption: '', duration: 5 });
+  renderScenes();
+};
+
+let jobId = null, timer = null;
+function say(t) { $('status').textContent = t; }
+const LM = { cho_chay: 'Chờ điều hành xử lý', dang_chay: 'Đang chạy',
+  done: 'Xong', failed: 'Lỗi' };
+async function poll() {
+  const r = await fetch(base() + '/jobs/' + jobId, { headers: headers() });
+  const d = await r.json();
+  let t = 'Đơn ' + jobId + '\nTrạng thái: ' + (LM[d.status] || d.status);
+  if (d.status === 'done') {
+    clearInterval(timer);
+    $('download').style.display = 'inline-block';
+    t += '\nVideo xong rồi, bấm tải về máy.';
+  } else if (d.status === 'failed') {
+    clearInterval(timer);
+    t += '\nLỗi: ' + (d.error || '');
+  }
+  say(t);
+}
+$('send').onclick = async () => {
+  saveConn();
+  const list = scenes.filter(s => s.prompt.trim() || s.caption.trim());
+  if (!list.length) { alert('Nhập ít nhất 1 cảnh có prompt hoặc lời thoại.'); return; }
+  const body = {
+    title: $('title').value.trim(),
+    characters: chars,
+    scenes: list.map(s => ({ prompt: s.prompt.trim(), caption: s.caption.trim(),
+      duration: parseInt(s.duration) || 5 })),
+    duration: list.reduce((a, s) => a + (parseInt(s.duration) || 5), 0),
+    mode: 'operator'
+  };
+  say('Đang gửi đơn...');
+  const r = await fetch(base() + '/jobs', {
+    method: 'POST', headers: headers(), body: JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) {
+    say('Lỗi ' + r.status + ': ' + (d.error || '') +
+      (r.status === 401 ? ' — kiểm tra lại token điều hành.' : ''));
+    return;
+  }
+  jobId = d.id;
+  say('Đã gửi đơn ' + jobId + ' lên trang điều hành. Chờ điều hành xử lý...');
+  if (timer) clearInterval(timer);
+  timer = setInterval(poll, 5000);
+};
+$('download').onclick = async () => {
+  const r = await fetch(base() + '/jobs/' + jobId + '/download',
+    { headers: headers() });
+  if (!r.ok) { alert('Chưa tải được (mã ' + r.status + ').'); return; }
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'musevideo-' + jobId + '.mp4';
+  a.click();
+};
+renderChars();
+renderScenes();
+</script>
+</body>
+</html>

@@ -14,6 +14,10 @@ Operator-queue model (theo mo hinh dieu hanh cua Hoa):
   POST /jobs/{id}/run      -> operator bam chay don (chi chay tu cho_chay;
                               don "operator" KHONG tu chay — dieu hanh xu ly
                               thu cong roi danh dau xong)
+  POST /jobs/{id}/complete -> dieu hanh tai file MP4 thanh pham len
+                              (raw MP4 bytes, cung X-Api-Key nhu /admin);
+                              ghi out.mp4 + job.json {"status": "done"} de
+                              trang admin va client hien "Xong" + nut tai
   GET  /jobs/{id}/download -> out.mp4 (404 until done)
   GET  /health             -> {"ok": true}
   GET  /                   -> web UI (web/index.html)
@@ -219,6 +223,28 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         p = urlparse(self.path).path
         parts = [unquote(x) for x in p.strip("/").split("/") if x]
+        if len(parts) == 3 and parts[0] == "jobs" \
+                and parts[2] == "complete":
+            if not self._auth_ok():
+                return self._send(401, {"error": "bad api key"})
+            job_dir = os.path.join(PROJECTS, parts[1])
+            if not os.path.isdir(job_dir):
+                return self._send(404, {"error": "job not found"})
+            ln = int(self.headers.get("Content-Length") or 0)
+            data = self.rfile.read(ln) if ln > 0 else b""
+            if len(data) < 1000 or data[4:8] != b"ftyp":
+                return self._send(400, {"error": "not an MP4 file"})
+            with open(os.path.join(job_dir, "out.mp4"), "wb") as f:
+                f.write(data)
+            view = _order_view(job_dir)
+            with open(os.path.join(job_dir, "job.json"), "w",
+                      encoding="utf-8") as f:
+                json.dump({
+                    "status": "done",
+                    "scenes": view.get("scenes", []),
+                    "output": os.path.join(job_dir, "out.mp4"),
+                }, f, ensure_ascii=False, indent=2)
+            return self._send(200, {"id": parts[1], "status": "done"})
         if len(parts) == 3 and parts[0] == "jobs" and parts[2] == "run":
             if not self._auth_ok():
                 return self._send(401, {"error": "bad api key"})

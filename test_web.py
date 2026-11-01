@@ -48,6 +48,18 @@ def req(method, path, body=None, key=None):
         return e.code, e.read(), e.headers
 
 
+def req_raw(method, path, blob, key=None, ctype="video/mp4"):
+    r = urllib.request.Request(BASE + path, data=blob, method=method)
+    r.add_header("Content-Type", ctype)
+    if key:
+        r.add_header("X-Api-Key", key)
+    try:
+        with urllib.request.urlopen(r, timeout=60) as resp:
+            return resp.status, resp.read(), resp.headers
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), e.headers
+
+
 def main():
     token = load_dotenv().get("MUSE_JOB_API_KEY", "")
     assert token, "MUSE_JOB_API_KEY missing from .env"
@@ -110,6 +122,7 @@ def main():
         f"download -> {status}, {len(data)} bytes"
     assert data[4:8] == b"ftyp", "not an MP4"
     print(f"5. download: {len(data)} bytes, MP4 OK")
+    mp4data = data
     status, body, _ = req("POST", f"/jobs/{jid}/run", key=token)
     assert json.loads(body)["status"] == "done", "re-run not idempotent"
     print("5. re-run on done order -> done OK")
@@ -135,6 +148,22 @@ def main():
     assert v["characters"][0]["name"] == "Khi", body[:200]
     assert v["scenes"][0].get("duration") == 7, body[:200]
     print("6. client page + operator order OK")
+    # 7. Operator completes an order by uploading the finished MP4
+    status, body, _ = req_raw("POST", f"/jobs/{op['id']}/complete",
+                              b"not a video", key=token)
+    assert status == 400, f"complete garbage -> {status} (expected 400)"
+    status, body, _ = req("POST", f"/jobs/{op['id']}/complete")
+    assert status == 401, f"complete no-key -> {status} (expected 401)"
+    status, body, _ = req_raw("POST", f"/jobs/{op['id']}/complete",
+                              mp4data, key=token)
+    assert status == 200, f"complete -> {status}: {body[:200]}"
+    assert json.loads(body)["status"] == "done", body[:200]
+    status, body, _ = req("GET", f"/jobs/{op['id']}", key=token)
+    assert json.loads(body)["status"] == "done", body[:200]
+    status, data, _ = req("GET", f"/jobs/{op['id']}/download", key=token)
+    assert status == 200 and len(data) == len(mp4data), \
+        f"completed download -> {status}, {len(data)} bytes"
+    print("7. operator complete + download OK")
     print("ALL QUEUE TESTS PASSED")
     return 0
 

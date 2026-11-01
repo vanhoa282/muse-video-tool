@@ -96,7 +96,10 @@ async function load() {
         btns.push('<button class="run" onclick="runJob(\'' + o.id +
           '\')">▶ Chạy đơn này</button>');
       if (o.status === 'cho_chay' && o.mode === 'operator')
-        btns.push('<span class="hint">Chờ điều hành xử lý thủ công</span>');
+        btns.push('<span class="hint">Chờ điều hành xử lý thủ công</span>' +
+          '<br><input type="file" accept="video/mp4" id="up-' + o.id + '">' +
+          '<button class="dl" onclick="completeJob(\'' + o.id +
+          '\')">⬆ Đã xử lý xong — tải file lên</button>');
       if (o.status === 'done')
         btns.push('<button class="dl" onclick="dlJob(\'' + o.id +
           '\')">⬇ Tải video</button>');
@@ -131,6 +134,20 @@ async function dlJob(id) {
   a.href = URL.createObjectURL(blob);
   a.download = 'musevideo-' + id + '.mp4';
   a.click();
+}
+async function completeJob(id) {
+  const input = document.getElementById('up-' + id);
+  const file = input && input.files && input.files[0];
+  if (!file) { alert('Chọn file MP4 thành phẩm trước.'); return; }
+  const h = {};
+  const k = keyEl.value.trim();
+  if (k) h['X-Api-Key'] = k;
+  h['Content-Type'] = 'video/mp4';
+  const r = await fetch(base() + '/jobs/' + id + '/complete',
+    { method: 'POST', headers: h, body: file });
+  const d = await r.json();
+  if (!r.ok) { alert('Lỗi ' + r.status + ': ' + (d.error || '')); return; }
+  load();
 }
 $('refresh').onclick = load;
 load();
